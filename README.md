@@ -1,7 +1,7 @@
 sdowninMisc Package
 =======
 
-This is a personal R package with helper and wrapper functions for data wrangling and analysis in the areas of network analysis, finance, statistics, econometrics, etc.
+This is a personal **R** package with helper and wrapper functions for data wrangling and analysis in the areas of network analysis, finance, statistics, econometrics, etc.
 
 ###Installation instructions
 **1. Install `devtools` and attach the library in R**
