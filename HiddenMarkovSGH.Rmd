@@ -1,0 +1,437 @@
+---
+title: "Modeling Index Returns with Hidden Markov Model using SGH Distribution"
+author: "Stephen"
+date: "October 2014"
+output: html_document
+---
+
+
+## Getting the Data
+
+
+Before getting the stock data we specify some stock indices to be used.
+
+```{r predata, eval=T, echo=F, message=F, cache=T}
+path <- "D://Dropbox//PhD//R//packages//sdowninMisc"
+setwd(path)
+# packages
+library(xts,quietly = T)
+library(TTR,quietly = T)
+library(timeDate,quietly = T)
+library(lubridate,quietly = T)
+library(depmixS4,quietly = T)
+library(ghyp,quietly = T)
+library(knitr,quietly = T)
+library(xtsExtra,quietly = T)
+library(forecast,quietly = T)
+
+symbols <- c("^FTSE","^GDAXI","^FCHI","^GSPC",
+             "^N225","^HSI","^BVSP","^MXX")
+symbols.names <- c("FTSE 100","DAX","CAC 40","S&P 500",
+                   "Nikkei 225","Hang Seng","Bovespa","IPC")
+print(cbind(symbols,symbols.names))
+```
+
+The returns data for the indices are loaded from Yahoo. To pull multiple indices at one time over a fairly long historical period of about 20 years, we define a funciton to loop through the indices and pull the data from Yahoo's historal data query site `ichart.yahoo.com`. The date limits in the URL are in the format $$ &a=<startday>&b=<startmonth>&c=<startyear>&c=<endday>&e=<endmonth>&f=<endyear>&g= $$.
+
+```{r pulldata, eval=F, echo=T, message=F, cache=T}
+# returns list: [[1]] data frame of given series from all symbols
+# [[2]] full list of all series from all symbols
+multiStockHistory <- function(symbols, #char vector
+                              symbols.names, #char vector 
+                              startday=1, #int
+                              startmonth=1,
+                              startyear=1970,
+                              endday=19,
+                              endmonth=10,
+                              endyear=2014,
+                              series="Adj.Close",
+                              ...)
+  {
+  #if(!require(xts)) {install.packages('xts')}
+  if(is.null(symbols.names)) {symbols.names <- symbols}
+  
+  # loop through symbols downloading series to list
+  x <- list()
+  for (i in 1:length(symbols)) {
+    base <- "http://ichart.yahoo.com/table.csv?s="
+    tail <- paste("&a=",startday,"&b=",startmonth,"&c=",startyear,"&d=",endday,"&e=",endmonth,"&f=",endyear,"&g=d&ignore=.csv",sep="")
+    url <- paste(base,symbols[i],tail,sep="")
+    x[[i]] <- read.table(url,sep=",",header=T, stringsAsFactors=F,flush = T,...)
+    x[[i]][,1] <- as.Date(x[[i]][,1])
+    x[[i]] <- xts(x[[i]][,-1], order.by=x[[i]][,1])
+    xtsAttributes(x[[i]]) <- list(IndexSymbol=symbols[i], IndexName=symbols.names[i])
+    if(i%%2 == 0) {cat("pulled symbol ",i,"\n") }
+  }
+    
+  #build xts df with only 1 series, e.g., Adj.Close
+  ind.df <- data.frame()
+  for (i in 1:length(x)) {
+    if (dim(ind.df)[2]==0) {
+      ind.df <- x[[i]][,series]
+      colnames(ind.df)[i] <- unlist(xtsAttributes(x[[i]]))[2]
+    } else {
+    ind.df <- merge.xts(ind.df,x[[i]][,series])
+    colnames(ind.df)[i] <- unlist(xtsAttributes(x[[i]]))[2]
+    }
+  }
+  return(list(df=ind.df,full.list=x))
+} #end function
+y <- multiStockHistory(symbols = symbols,symbols.names = symbols.names,
+                       startday=1,startmonth=1,startyear=1999,
+                       endday=19,endmonth=10,endyear=2014,series="Adj.Close")
+dput(x = y, file = "historicalIndicesList.Rdata")
+```
+
+Unfortunately, **knitr** is have some trouble opening the connection to read the data from the URL in the knitr markdown file, but this function works fine in a regular **R** script (or even within knitr markdown...up until the document is compiled, oddly enough). No matter, we can just save the data to an `Rdata` file and    
+Now we can take a look at just the Adjusted Close data frame we will be using.
+
+```{r data, eval=T, echo=T, message=F, cache=T}
+y <- dget("historicalIndicesList.Rdata")
+ydf <- y$df
+ydfn <- na.omit(ydf)
+head(ydfn)
+summary(ydfn)
+dim(ydfn)
+```
+
+Next we need exchange rates to standardize indices to a single currency, in this case US$. Exchange rates can be downloaded from the US Federal Reserve at *www.federalreserve.gov/datadownload/* to choose which currencies. The file used in this analysis was pulled from: http://www.federalreserve.gov/datadownload/Download.aspx?rel=H10&series=a6a0113179fdeb9c6fbcdc18575ec09c&filetype=csv&label=include&layout=seriescolumn&from=01/01/1999&to=04/09/2014
+
+
+```{r exchange, eval=T, echo=T, message=F, cache=T}
+# exchange rates from 01-01-1999 to 04-09-2014
+url <- "http://www.federalreserve.gov/datadownload/Output.aspx?rel=H10&series=a6a0113179fdeb9c6fbcdc18575ec09c&lastObs=&from=01/01/1999&to=04/09/2014&filetype=csv&label=include&layout=seriescolumn"
+ex <- read.table(url,skip=5,sep=",",na.strings="ND",header=T,stringsAsFactors = F) 
+ex[,1] <- as.Date(ex[,1], format="%m/%d/%Y")
+ex <- as.xts(ex[,-1], order.by=ex[,1])
+# assign colnames from two-letter currency code (last 2 digits)
+for (i in 1:length(names(ex))) {
+  colnames(ex)[i] <- substr(colnames(ex)[i],nchar(colnames(ex)[i])-1,nchar(colnames(ex)[i]))
+}
+# drop the returns dates outside of exchange dates range
+exsub <- ex["1999/2014-04-04"]
+ydfsub <- ydf["1999/2014-04-04"]
+```
+
+Merge the returns series with the exchange rate data and and convert all series to US$.
+
+```{r merge, eval=T, echo=T, message=F, cache=T}
+merged <- na.omit(merge.xts(ydfsub,exsub))
+
+# data frame for converted returns
+r <- merged[,1:8]
+# [1] "FTSE.100"   "DAX"        "CAC.40"    
+# [4] "S.P.500"    "Nikkei.225" "Hang.Seng" 
+# [7] "Bovespa"    "IPC" 
+r[,1] <- merged[,1] *  merged$UK
+r[,2] <- merged[,2] *  merged$EU
+r[,3] <- merged[,3] *  merged$EU
+r[,4] <- merged[,4] *  1
+r[,5] <- merged[,5] /  merged$JA
+r[,6] <- merged[,6] /  merged$HK
+r[,7] <- merged[,7] /  merged$BZ
+r[,8] <- merged[,8] /  merged$MX
+head(r)
+summary(r)
+# log differenced data for returns
+rna <- na.omit(r)
+ret <- diff(rna,lag = 1,log = T)
+ret <- na.omit(ret)
+
+```
+
+Lets take a look at these data.
+
+```{r plotreturns, eval=T, echo=T, message=F, fig.width=10, dependson=1}
+xtsExtra::plot.xts(log(ydfsub), screens=factor(1,1), auto.legend=T, legend.loc = "topleft" , main="Selected World Composite Indices \n (log daily prices in USD)", minor.ticks=F,cex=.6) 
+```
+
+And check their correlations.
+
+```{r panelcorr, eval=T, echo=F, message=FALSE, cache=T}
+panel.cor <- function(x, y, digits=2, cex.cor)
+{
+  usr <- par("usr"); on.exit(par(usr))
+  par(usr = c(0, 1, 0, 1))
+  r <- abs(cor(x, y))
+  txt <- format(c(r, 0.123456789), digits=digits)[1]
+  test <- cor.test(x,y)
+  Signif <- ifelse(round(test$p.value,3)<0.001,"p<0.001",paste("p=",round(test$p.value,3)))  
+  text(0.5, 0.25, paste("r=",txt))
+  text(.5, .75, Signif)
+}
+
+panel.smooth<-function (x, y, col = "blue", bg = NA, pch = 18, 
+                        cex = 0.8, col.smooth = "red", span = 2/3, iter = 3, ...) 
+{
+  points(x, y, pch = pch, col = col, bg = bg, cex = cex)
+  ok <- is.finite(x) & is.finite(y)
+  if (any(ok)) 
+    lines(stats::lowess(x[ok], y[ok], f = span, iter = iter), 
+          col = col.smooth, ...)
+}
+
+panel.hist <- function(x, ...)
+{
+  usr <- par("usr"); on.exit(par(usr))
+  par(usr = c(usr[1:2], 0, 1.5) )
+  h <- hist(x, plot = FALSE)
+  breaks <- h$breaks; nB <- length(breaks)
+  y <- h$counts; y <- y/max(y)
+  rect(breaks[-nB], 0, breaks[-1], y, col="gray", ...)
+}
+
+```
+
+
+```{r pairs, eval=T, echo=T, message=F, fig.width=10, fig.height=10}
+pairs(as.data.frame(ret),
+      lower.panel=panel.smooth,upper.panel=panel.cor,diag.panel=panel.hist)
+```
+
+## Symmetric Generalized Hyperbolic Distribution
+
+The **ghyp** package offers the ability to fit symmetric generalized hyperbolic (SGH) distributions in **R**. We fit the pairs assuming an SGH and plot. 
+
+```{r ghyppairs, eval=T, echo=T, message=F, cache.vars=T, fig.width=10, fig.height=10, dependson=1}
+library(ghyp)
+ghypmv.fit <- ghyp::fit.ghypmv(data=ret,silent=TRUE, symmetric=T)
+pairs(ghypmv.fit, cex=0.5, nbins=20)
+```
+
+
+And we can isolate a few specific series like the S&P500 and DAX.
+
+```{r sandp500, eval=T, echo=T, message=F,fig.width=8,fig.height=8, cache.vars=T, dependson=1}
+ghypuv.fit.sp <- fit.hypuv(data=ret[,"S.P.500"],silent=T,symmetric=T)
+ghypuv.fit.dx <- fit.hypuv(data=ret[,"DAX"],silent=T,symmetric=T)
+
+par(mfrow=c(2,2))
+hist(ghypuv.fit.sp,ghyp.col="blue",legend.cex=0.9, 
+     main="S&P 500\nHistogram of data")
+qqghyp(ghypuv.fit.sp,plot.legend=T,legend.cex=0.9,
+       main="S&P 500\nGeneralized Hyperbolic QQ Plot")
+hist(ghypuv.fit.dx,ghyp.col="blue",legend.cex=0.9,
+     main="DAX\nHistogram of data")
+qqghyp(ghypuv.fit.dx,plot.legend=T,legend.cex=0.9,
+       main="DAX\nGeneralized Hyperbolic QQ Plot")
+```
+
+## HMM SGM Algorithm
+
+The `depmix()` function in the **depmixS4** package can get us a HMM fit assuming a Gaussian distribution or several other common distributions, but not generalized hyperbolic. That's a start. These Markov state classifications combined with the `fit.ghypmv()` function in the **ghyp** package for fitting multivariate SGH should provide an improvement over the HMM assuming Gaussian returns. 
+
+The piecemeal algorithm for combining these two packages in **R** is as follows:
+
+1. Compute steady-state Markov transition probabilities by fitting HMM under Gaussian distribution with `depmixS4::depmix()` function
+2. Assign Markov states based on Gaussian HMM posterior probabilities from (1)
+3. Fit SGH_1_ and SGH_2_ distributions separately for subset of data classified as state 1 or state 2 in previous step with `ghyp::fit.ghypmv(...,symmetric=TRUE)` function
+4. Use SGH_i_ parameters and Gaussian HMM transition probabilities to calculate posterior probabilities for each time period
+
+This is performed with the `ghypMarkov()` function defined below:
+
+```{r ghypMarkov, eval=T, echo=T, message=F, cache=T, dependson=1}
+# returns a list of posterior probabilities, HMM state classifications,
+# parameters, transition matrix and steady state probabilities
+ghypMarkov <- function(data,
+                       response,  #list of series in dataframe
+                       family, #list of initial HMM distr used in depmix()
+                       ...
+                       ) {
+  library(depmixS4)
+  library(ghyp)
+
+  ## Markov multistep calculation assumes only 2 Markov states #########
+  # 1. determine states from Gaussian
+  msp <- depmix(data=data, response = response,family = family, nstates = 2, ...)
+  #optimize parameters
+  set.seed(1)
+  fmsp <- fit(msp, ...) 
+  
+  # 2. fit ghypmv to only obs identified as state 1 (or 2)
+  s1 <- which(posterior(fmsp)[,1]==1)
+  s2 <- which(posterior(fmsp)[,1]==2)
+  
+  fitghs1 <- fit.ghypmv(data = data[s1,],symmetric = T,save.data = T,trace = T,silent = T, ...)
+  
+  lambda1 <- attributes(fitghs1)$lambda
+  alpha.bar1 <- attributes(fitghs1)$alpha.bar
+  mu1 <- attributes(fitghs1)$mu
+  sigma1 <- attributes(fitghs1)$sigma
+  gamma1 <- rep(0,dim(data)[2])
+  
+  fitghs2 <- fit.ghypmv(data = data[s2,],symmetric = T,save.data = T,trace = T,silent = T, ...)
+  
+  lambda2 <- attributes(fitghs2)$lambda
+  alpha.bar2 <- attributes(fitghs2)$alpha.bar
+  mu2 <- attributes(fitghs2)$mu
+  sigma2 <- attributes(fitghs2)$sigma
+  gamma2 <- rep(0,dim(data)[2])
+  
+  # 3. recalculate posterior probabilities with new ghypmv params
+  p <- matrix(rep(NA,4),2)
+  p[1,1:2] <- attributes(attributes(fmsp)$transition[[1]])$parameters$coefficients
+  p[2,1:2]<- attributes(attributes(fmsp)$transition[[2]])$parameters$coefficients
+  
+  pi <- vector()
+  pi[1] <- (1-p[2,2]) / (2 - p[1,1] - p[2,2])
+  pi[2] <- (1-p[1,1]) / (2 - p[1,1] - p[2,2])
+  
+  ghyp1 <- ghyp(lambda = lambda1,
+                alpha.bar = alpha.bar1,
+                mu = mu1,
+                sigma = sigma1,
+                gamma = gamma1 )
+  ghyp2 <- ghyp(lambda = lambda2,
+                alpha.bar = alpha.bar2,
+                mu = mu2,
+                sigma = sigma2,
+                gamma = gamma2)
+  dgh1 <- dghyp(x = data[s1,], object = ghyp1)
+  dgh2 <- dghyp(x = data[s2,], object = ghyp2)
+  
+  pstar1 <- c()
+  pstar2 <- c()
+  
+  for (i in 1:dim(data)[1]) {
+    if (i==1) {
+      post1 <- (pi[1]*p[1,1]+pi[2]*p[2,1])*dghyp(x=data[1,],
+                                                 object=ghyp1) 
+      post2 <- (pi[1]*p[1,2]+pi[2]*p[2,2])*dghyp(x=data[1,],
+                                                 object=ghyp2)
+      pstar1[i] <- post1 / (post1 + post2)
+      pstar2[i] <- post2 / (post1 + post2)
+    } else {
+      post1 <- (pstar1[i-1]*p[1,1]
+                +pstar2[i-1]*p[2,1])*dghyp(x=data[i-1,],
+                                           object=ghyp1) 
+      post2 <- (pstar1[i-1]*p[1,2]
+                +pstar2[i-1]*p[2,2])*dghyp(x=data[i-1,],
+                                           object=ghyp2)
+      pstar1[i] <- post1 / (post1 + post2)
+      pstar2[i] <- post2 / (post1 + post2)
+    }
+  }
+psdf <- data.frame(pstar1=pstar1,pstar2=pstar2)
+  psdf$state <- NA
+  psdf$state[psdf$pstar2 >= .5] <- 2
+  psdf$state[psdf$pstar1 >= .5] <- 1
+  psdf <- psdf[,c(3,1,2)]  #reorder state var first
+  
+  return(list(ghyp.posterior=psdf,
+              ghyp.state1=fitghs1,
+              ghyp.state2=fitghs2,
+              gaussian.posterior=posterior(fmsp),
+              pi=pi,
+              p=p) )
+} # end function
+
+
+```
+
+To run the `ghypMarkov()` function we first need to assign the response series as a list according to the `depmix()` convention, and then define the family of distributions for each series to be used by `depmix()` as well.
+
+```{r fit.ghypMarkov, eval=T, echo=T, message=F, dependson=c(1,-1), cache.vars=T}
+
+library(depmixS4)
+library(ghyp)
+
+# run functions
+response8 <- list(FTSE.100~1,DAX~1,CAC.40~1,S.P.500~1,Nikkei.225~1,
+                  Hang.Seng~1,Bovespa~1,IPC~1)
+family8 <- list(gaussian(),gaussian(),gaussian(),gaussian(),
+                gaussian(),gaussian(),gaussian(),gaussian())
+
+# 8 indices
+fit.ghypMarkov <- ghypMarkov(data = ret,
+                             response = response8,
+                             family = family8)
+
+```
+
+The parameters for the different states are now easily extracted from the resulting list:
+
+```{r params, eval=T, echo=T, message=F, dependson=c(1,-2), cache.vars=T}
+fit.ghypMarkov$ghyp.state1
+fit.ghypMarkov$ghyp.state2
+```
+
+```{r postplot1, eval=T, echo=T, message=F, cache.vars=T, fig.height=8, fig.width=10}
+filSGH10 <- filter(fit.ghypMarkov[[1]][,2],filter = rep(1/10,10),
+                 method = "convolution",sides = 1)
+filGaus10 <- filter(fit.ghypMarkov[[4]][,2],filter = rep(1/10,10),
+              method = "convolution",sides = 1)
+filSGH100 <- filter(fit.ghypMarkov[[1]][,2],filter = rep(1/100,100),
+                 method = "convolution",sides = 1)
+filGaus100 <- filter(fit.ghypMarkov[[4]][,2],filter = rep(1/100,100),
+              method = "convolution",sides = 1)
+par(mfrow=c(2,1))
+par(mar=c(2,4.3,2.1,1.5))
+
+matplot(cbind(fit.ghypMarkov[[1]][,2],
+              fit.ghypMarkov[[4]][,2],
+              filSGH100,
+              filGaus100), 
+        alpha=0.5,
+        type="l",ylab=expression(P(xi[1])), 
+        main="Gaussian vs SGH Markov Posterior Probabilities",
+        lty=c(1,1,1,1),lwd=c(1,1,3,3)
+        )
+matplot(cbind(fit.ghypMarkov[[1]][,2],
+              fit.ghypMarkov[[4]][,2],
+              filSGH10,
+              filGaus10),
+        type="l",xlim=c(2300,2400),
+        main="Zoom into 100pd Window",
+        ylab=expression(P(xi[i1])),lty=c(1,1,1,1), lwd=c(1,1,2,2)
+        )
+
+legend(x=2370,y=.8,legend=c("SGH","Gaussian","SGH-10pdMA","Gaus-10pdMA"),
+       col=c('black','red','green','blue'),
+       lty=c(1,1,1,1),lwd=c(1,1,2,2))
+
+
+
+```
+
+
+```{r retMarkov, eval=T, echo=T, cache.vars=T, dependson=c(1,-4), fig.height=6, fig.width=6}
+retMarkov <- function(data,
+                      posterior) 
+  {
+  #returns by hidden state
+  mret <- data.frame(state1=rep(NA,dim(data)[2]),state2=rep(NA,dim(data)[2]))
+  for (i in 1:dim(data)[2]) {
+    mret[i,1] <- mean(data[posterior[,1]==1,i])
+    mret[i,2] <- mean(data[posterior[,1]==2,i])
+  }
+  row.names(mret) <- names(data)
+  
+  mrettot <- data.frame(state1=rep(NA,1),state2=rep(NA,1))
+  mrettot[1,1] <- mean(data[posterior[,1]==1,])
+  mrettot[1,2] <- mean(data[posterior[,1]==2,])
+  
+  if(mrettot[1,1]>mrettot[1,2]) {
+    colnames(mret) <- c("Optimistic", "Pessimistic")
+    colnames(mrettot) <- c("Optimistic", "Pessimistic")
+  } else {
+    colnames(mret) <- c("Pessimistic", "Optimistic")
+    colnames(mrettot) <- c("Pessimistic", "Optimistic")
+  }
+
+  return(list(returns.by.index=mret, returns.total=mrettot))
+} #end function
+
+ret8 <- retMarkov(data = ret, posterior = fit.ghypMarkov[[1]])
+
+plot(ret8$returns.by.index$Optimistic,type='o',col='dark green',ylim=c(-.002,.001),main="Profile of Log Returns by Hidden Markov State \n8 Indices",ylab="Log Returns");lines(ret8$returns.by.index$Pessimistic,type='o',col='red');abline(h = 0);abline(h=ret8$returns.total$Optimistic,lty=3,col='dark green');abline(h=ret8$returns.total$Pessimistic,lty=3,col='red');legend(x = 1,y = -.0012,legend = c("Optimistic","Pessimistic"),lty = 1,col = c('dark green','red'))
+
+```
+
+
+
+## References
+
+1. Breymann, W. and Luthi, D. (2013) [ghyp: A package on generalized hyperbolic distributions](http://cran.r-project.org/web/packages/ghyp/vignettes/Generalized_Hyperbolic_Distribution.pdf)
+2. Visser, I. and Speekenbrink, M. (2014)
+[depmixS4: An R Package for Hidden Markov Models](http://www.jstatsoft.org/v36/i07/paper)
