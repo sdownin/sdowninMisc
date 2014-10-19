@@ -102,12 +102,13 @@ Next we need exchange rates to standardize indices to a single currency, in this
 # exchange rates from 01-01-1999 to 04-09-2014
 url <- "http://www.federalreserve.gov/datadownload/Output.aspx?rel=H10&series=a6a0113179fdeb9c6fbcdc18575ec09c&lastObs=&from=01/01/1999&to=04/09/2014&filetype=csv&label=include&layout=seriescolumn"
 ex <- read.table(url,skip=5,sep=",",na.strings="ND",header=T,stringsAsFactors = F) 
-ex[,1] <- as.Date(ex[,1], format="%m/%d/%Y")
+ex[,1] <- ymd(ex[,1])
 ex <- as.xts(ex[,-1], order.by=ex[,1])
 # assign colnames from two-letter currency code (last 2 digits)
 for (i in 1:length(names(ex))) {
   colnames(ex)[i] <- substr(colnames(ex)[i],nchar(colnames(ex)[i])-1,nchar(colnames(ex)[i]))
 }
+ex <- na.omit(ex)
 # drop the returns dates outside of exchange dates range
 exsub <- ex["1999/2014-04-04"]
 ydfsub <- ydf["1999/2014-04-04"]
