@@ -1,6 +1,6 @@
 ---
 title: "Modeling Index Returns with Hidden Markov Model using SGH Distribution"
-author: "Stephen"
+author: "Stephen Downing"
 date: "October 2014"
 output: html_document
 ---
