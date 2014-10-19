@@ -3,12 +3,10 @@
 \alias{sdowninMisc}
 \docType{package}
 \title{
-What the package does (short line)
-~~ package title ~~
+What the package does 
 }
 \description{
-More about what it does (maybe more than one line)
-~~ A concise (1-5 lines) description of the package ~~
+More about what it does 
 }
 \details{
 \tabular{ll}{
@@ -16,29 +14,24 @@ Package: \tab sdowninMisc\cr
 Type: \tab Package\cr
 Version: \tab 1.0\cr
 Date: \tab 2014-10-19\cr
-License: \tab What license is it under?\cr
+License: \tab GPL (v3 or later)\cr
 }
-~~ An overview of how to use the ~~
-~~ package, including the most ~~
-~~ important functions ~~
+overview and important functions
 }
 \author{
-Who wrote it
+Stephen Downing
 
-Maintainer: Who to complain to <yourfault@somewhere.net>
-~~ The author and/or maintainer of the package ~~
+Maintainer: Stephen Downing <sdowning.bm02g@nctu.edu.tw>
 }
 \references{
-~~ Literature or other references for background information ~~
+ghyp, depmixS4
 }
-~~ Optionally other standard keywords, ~~
-~~ one per line, from file KEYWORDS in ~~
-~~ the R documentation directory ~~
+Markov models, stock returns
 \keyword{ package }
 \seealso{
-~~ Optional links to other man pages, e.g. ~~
-~~ \code{\link[<pkg>:<pkg>-package]{<pkg>}} ~~
+   \code{\link[depmix:dempixS4-package]{depmixS4}}
+   \code{\link[ghyp-package]{ghyp}}
 }
 \examples{
-~~ simple examples of the most important functions ~~
+ghypMarkov()
 }

@@ -8,22 +8,21 @@ library(devtools)
 #' @param symbols char vector of stock or index symbols
 #' @param symbols.names char vector of names for symbols
 #' @param startday int first day of series
-#' @param startmonth int first day of series
-#' @param startyear int first day of series
-#' @param endday int first day of series
-#' @param endmonth int first day of series
-#' @param endyear int first day of series
+#' @param startmonth int 
+#' @param startyear int 
+#' @param endday int 
+#' @param endmonth int 
+#' @param endyear int
 #' @param series char default "Adj.Close" {"High","Low","Close","Volume","Adj.Close"}
 #' @return list: [[1]] data.frame of series attribute from all symbols, [[2]] list of data.frames of all series from all symbols
 #' @author Stephen Downing
 #' @details This function downloads multiple historic series for stocks and stock indices from Yahoo, returning a returns list: [[1]] data frame of given series from all symbols [[2]] full list of all series data frames from all symbols
-#' @example
+#' @examples
 #' \dontrun{
 #' multiStockHistory(c('AAPL','GOOG'))
 #' tail(y$df)
 #' }
 #' @export
-
 multiStockHistory <- function(symbols, #char vector
                               symbols.names=NULL, #char vector 
                               startday=1, #int

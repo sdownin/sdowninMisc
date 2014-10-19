@@ -1,9 +1,9 @@
 Package: sdowninMisc
 Type: Package
-Title: What the package does (short line)
+Title: Misc helper and wrapper functions
 Version: 1.0
 Date: 2014-10-19
-Author: Who wrote it
-Maintainer: Who to complain to <yourfault@somewhere.net>
-Description: More about what it does (maybe more than one line)
-License: What license is it under?
+Author: Stephen Downing
+Maintainer: Stephen Downing <sdownin.bm02g@nctu.edu.tw>
+Description: Personal R package with miscellaneous data wrangling, data analysis, helper and wrapper functions.
+License: GPL (v3 or later)
