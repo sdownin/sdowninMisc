@@ -3,10 +3,10 @@
 \alias{sdowninMisc}
 \docType{package}
 \title{
-What the package does 
+The Personal R package of Stephen Downing
 }
 \description{
-More about what it does 
+A personal R package with miscellaneous functions for data wrangling, analysis, and simulation.
 }
 \details{
 \tabular{ll}{
@@ -16,7 +16,7 @@ Version: \tab 1.0\cr
 Date: \tab 2014-10-19\cr
 License: \tab GPL (v3 or later)\cr
 }
-overview and important functions
+Miscellaneous functions for data wrangling (e.g., multiStockHistory(), mapBetween()), analysis (e.g., ghypMarkov()), and simulation.
 }
 \author{
 Stephen Downing
